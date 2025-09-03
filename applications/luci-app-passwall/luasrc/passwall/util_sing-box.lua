@@ -366,7 +366,11 @@ function gen_outbound(flag, node, tag, proxy_table)
 			end
 			protocol_table = {
 				server_ports = next(server_ports) and server_ports or nil,
-				hop_interval = next(server_ports) and "30s" or nil,
+				hop_interval = (function()
+							if not next(server_ports) then return nil end
+							local v = tonumber((node.hysteria_hop_interval or "30s"):match("^%d+"))
+							return (v and v >= 5) and (v .. "s") or "30s"
+						end)(),
 				up_mbps = tonumber(node.hysteria_up_mbps),
 				down_mbps = tonumber(node.hysteria_down_mbps),
 				obfs = node.hysteria_obfs,
@@ -438,7 +442,11 @@ function gen_outbound(flag, node, tag, proxy_table)
 			end
 			protocol_table = {
 				server_ports = next(server_ports) and server_ports or nil,
-				hop_interval = next(server_ports) and "30s" or nil,
+				hop_interval = (function()
+							if not next(server_ports) then return nil end
+							local v = tonumber((node.hysteria2_hop_interval or "30s"):match("^%d+"))
+							return (v and v >= 5) and (v .. "s") or "30s"
+						end)(),
 				up_mbps = (node.hysteria2_up_mbps and tonumber(node.hysteria2_up_mbps)) and tonumber(node.hysteria2_up_mbps) or nil,
 				down_mbps = (node.hysteria2_down_mbps and tonumber(node.hysteria2_down_mbps)) and tonumber(node.hysteria2_down_mbps) or nil,
 				obfs = {
@@ -467,6 +475,18 @@ function gen_outbound(flag, node, tag, proxy_table)
 				idle_session_timeout = "30s",
 				min_idle_session = 5,
 				tls = tls
+			}
+		end
+
+		if node.protocol == "ssh" then
+			protocol_table = {
+				user = (node.username and node.username ~= "") and node.username or "root",
+				password = (node.password and node.password ~= "") and node.password or "",
+				private_key = node.ssh_priv_key,
+				private_key_passphrase = node.ssh_priv_key_pp,
+				host_key = node.ssh_host_key,
+				host_key_algorithms = node.ssh_host_key_algo,
+				client_version = node.ssh_client_version
 			}
 		end
 
@@ -1280,7 +1300,7 @@ function gen_config(var)
 							end
 						end
 					end
-
+					
 					local rule = {
 						inbound = inboundTag,
 						outbound = outboundTag,
@@ -1497,7 +1517,7 @@ function gen_config(var)
 				server = dns_socks_address,
 				server_port = tonumber(dns_socks_port)
 			})
-		else
+		else 
 			default_outTag = COMMON.default_outbound_tag
 		end
 
@@ -1535,6 +1555,9 @@ function gen_config(var)
 			end
 
 			if remote_server.address then
+				if api.is_local_ip(remote_server.address) then  --dns为本地ip，不走代理
+					remote_server.detour = "direct"
+				end
 				table.insert(dns.servers, remote_server)
 			end
 
@@ -1544,7 +1567,7 @@ function gen_config(var)
 					inet4_range = "198.18.0.0/15",
 					inet6_range = "fc00::/18",
 				}
-
+				
 				table.insert(dns.servers, {
 					tag = fakedns_tag,
 					address = "fakeip",
@@ -1590,10 +1613,13 @@ function gen_config(var)
 			end
 
 			if remote_server.server then
+				if api.is_local_ip(remote_server.server) then  --dns为本地ip，不走代理
+					remote_server.detour = "direct"
+				end
 				table.insert(dns.servers, remote_server)
 			end
 
-			if remote_dns_fake then
+			if remote_dns_fake then		
 				table.insert(dns.servers, {
 					tag = fakedns_tag,
 					type = "fakeip",
@@ -1649,7 +1675,7 @@ function gen_config(var)
 						direct_dns_server = "tls://[" .. direct_dns_dot_server .. "]:" .. port
 					end
 				end
-
+		
 				table.insert(dns.servers, {
 					tag = "direct",
 					address = direct_dns_server,
@@ -1672,7 +1698,7 @@ function gen_config(var)
 					direct_dns_server = direct_dns_dot_server
 					type = "tls"
 				end
-
+		
 				table.insert(dns.servers, {
 					tag = "direct",
 					type = type,
@@ -1739,7 +1765,9 @@ function gen_config(var)
 						if value.outboundTag ~= COMMON.default_outbound_tag and (remote_server.address or remote_server.server) then
 							local remote_shunt_server = api.clone(remote_server)
 							remote_shunt_server.tag = value.outboundTag
-							remote_shunt_server.detour = value.outboundTag
+							local is_local = (remote_server.address and api.is_local_ip(remote_server.address)) or
+									 (remote_server.server and api.is_local_ip(remote_server.server))  --dns为本地ip，不走代理
+							remote_shunt_server.detour = is_local and "direct" or value.outboundTag
 							table.insert(dns.servers, remote_shunt_server)
 							dns_rule.server = remote_shunt_server.tag
 						end
@@ -1757,7 +1785,7 @@ function gen_config(var)
 				end
 			end
 		end
-
+	
 		table.insert(inbounds, {
 			type = "direct",
 			tag = "dns-in",
@@ -1777,7 +1805,7 @@ function gen_config(var)
 			outbound = "dns-out"
 		})
 	end
-
+	
 	if inbounds or outbounds then
 		local config = {
 			log = {
@@ -2001,7 +2029,7 @@ function gen_proto_config(var)
 		}
 		if outbound then table.insert(outbounds, outbound) end
 	end
-
+	
 	local config = {
 		log = {
 			disabled = true,

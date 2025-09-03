@@ -210,7 +210,7 @@ o = s:option(ListValue, _n("flow"), translate("flow"))
 o.default = ""
 o:value("", translate("Disable"))
 o:value("xtls-rprx-vision")
-o:depends({ [_n("protocol")] = "vless" })
+o:depends({ [_n("protocol")] = "vless" , [_n("tls")] = true })
 
 o = s:option(Flag, _n("tls"), translate("TLS"))
 o.default = 0
@@ -317,8 +317,8 @@ o:depends({ [_n("ech")] = true })
 o.validate = function(self, value)
 	value = value:gsub("^%s+", ""):gsub("%s+$","\n"):gsub("\r\n","\n"):gsub("[ \t]*\n[ \t]*", "\n")
 	value = value:gsub("^%s*\n", "")
-	if value:sub(-1) == "\n" then
-		value = value:sub(1, -2)
+	if value:sub(-1) == "\n" then  
+		value = value:sub(1, -2)  
 	end
 	return value
 end
