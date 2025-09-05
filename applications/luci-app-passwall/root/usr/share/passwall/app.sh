@@ -389,6 +389,15 @@ eval_cache_var() {
 	[ -s "$TMP_PATH/var" ] && eval $(cat "$TMP_PATH/var")
 }
 
+has_1_65535() {
+	local val="$1"
+	val=${val//:/-}
+	case ",$val," in
+		*,1-65535,*) return 0 ;;
+		*) return 1 ;;
+	esac
+}
+
 run_ipt2socks() {
 	local flag proto tcp_tproxy local_port socks_address socks_port socks_username socks_password log_file
 	local _extra_param=""
@@ -527,7 +536,7 @@ run_xray() {
 	[ -n "$http_username" ] && [ -n "$http_password" ] && _extra_param="${_extra_param} -local_http_username $http_username -local_http_password $http_password"
 	[ -n "$dns_socks_address" ] && [ -n "$dns_socks_port" ] && _extra_param="${_extra_param} -dns_socks_address ${dns_socks_address} -dns_socks_port ${dns_socks_port}"
 	[ -n "$dns_listen_port" ] && _extra_param="${_extra_param} -dns_listen_port ${dns_listen_port}"
-
+	
 	if [ -n "$direct_dns_udp_server" ]; then
 		direct_dns_port=$(echo ${direct_dns_udp_server} | awk -F '#' '{print $2}')
 		_extra_param="${_extra_param} -direct_dns_udp_server $(echo ${direct_dns_udp_server} | awk -F '#' '{print $1}')"
@@ -1236,13 +1245,17 @@ socks_node_switch() {
 	local flag new_node
 	eval_set_val $@
 	[ -n "$flag" ] && [ -n "$new_node" ] && {
+		local prefix pf filename
 		# 结束 SS 插件进程
-		local pf; for pf in "$TMP_PATH"/{,HTTP_}SOCKS_"$flag"_plugin.pid; do
+		for prefix in "" "HTTP_"; do
+			pf="$TMP_PATH/${prefix}SOCKS_${flag}_plugin.pid"
 			[ -s "$pf" ] && kill -9 "$(head -n1 "$pf")" >/dev/null 2>&1
 		done
 
 		pgrep -af "$TMP_BIN_PATH" | awk -v P1="${flag}" 'BEGIN{IGNORECASE=1}$0~P1 && !/acl\/|acl_/{print $1}' | xargs kill -9 >/dev/null 2>&1
-		rm -rf "$TMP_PATH"/{,HTTP_,HTTP2}SOCKS_"$flag"*
+		for prefix in "" "HTTP_" "HTTP2"; do
+			rm -rf "$TMP_PATH/${prefix}SOCKS_${flag}"*
+		done
 
 		for filename in $(ls ${TMP_SCRIPT_FUNC_PATH}); do
 			cmd=$(cat ${TMP_SCRIPT_FUNC_PATH}/${filename})
@@ -1428,7 +1441,7 @@ start_dns() {
 			china_ng_local_dns=${LOCAL_DNS}
 			sing_box_local_dns="direct_dns_udp_server=${LOCAL_DNS}"
 		;;
-		tcp)
+		tcp)	
 			local DIRECT_DNS=$(config_t_get global direct_dns_tcp 223.5.5.5 | sed 's/:/#/g')
 			china_ng_local_dns="tcp://${DIRECT_DNS}"
 			sing_box_local_dns="direct_dns_tcp_server=${DIRECT_DNS}"
@@ -1703,7 +1716,7 @@ start_dns() {
 			ln_run "$(first_type dnsmasq)" "dnsmasq_direct" "/dev/null" -C ${DIRECT_DNSMASQ_CONF} -x ${GLOBAL_ACL_PATH}/direct_dnsmasq.pid
 			echo "${DIRECT_DNSMASQ_PORT}" > ${GLOBAL_ACL_PATH}/direct_dnsmasq_port
 		}
-
+		
 		#Rewrite the default DNS service configuration
 		#Modify the default dnsmasq service
 		lua $APP_PATH/helper_dnsmasq.lua stretch
@@ -1794,10 +1807,9 @@ acl_app() {
 		dnsmasq_port=${GLOBAL_DNSMASQ_PORT:-11400}
 		chinadns_port=11500
 		for item in $items; do
-			sid=$(uci -q show "${CONFIG}.${item}" | grep "=acl_rule" | awk -F '=' '{print $1}' | awk -F '.' '{print $2}')
+			local sid=$(uci -q show "${CONFIG}.${item}" | grep "=acl_rule" | awk -F '=' '{print $1}' | awk -F '.' '{print $2}')
+			[ "$(config_n_get $sid enabled)" = "1" ] || continue
 			eval $(uci -q show "${CONFIG}.${item}" | cut -d'.' -sf 3-)
-
-			[ "$enabled" = "1" ] || continue
 
 			if [ -n "${sources}" ]; then
 				for s in $sources; do
@@ -1833,7 +1845,7 @@ acl_app() {
 			}
 			tcp_no_redir_ports=${tcp_no_redir_ports:-${TCP_NO_REDIR_PORTS}}
 			udp_no_redir_ports=${udp_no_redir_ports:-${UDP_NO_REDIR_PORTS}}
-			if [ "$tcp_no_redir_ports" == "1:65535" ] && [ "$udp_no_redir_ports" == "1:65535" ]; then
+			if has_1_65535 "$tcp_no_redir_ports" && has_1_65535 "$udp_no_redir_ports"; then
 				unset use_global_config
 				unset tcp_node
 				unset udp_node
@@ -2011,7 +2023,7 @@ acl_app() {
 								run_dns ${_dns_port}
 							fi
 							set_cache_var "ACL_${sid}_tcp_node" "${tcp_node}"
-							set_cache_var "ACL_${sid}_tcp_redir_port" "${redir_port}"
+							set_cache_var "ACL_${sid}_tcp_redir_port" "${tcp_port}"
 						fi
 					}
 				fi
@@ -2027,9 +2039,9 @@ acl_app() {
 					else
 						echolog "  - 全局节点未启用，跳过【${remarks}】"
 					fi
-				elif [ "$udp_node" = "tcp" ]; then
+				elif [ "$udp_node" = "tcp" ] || [ "$udp_node" = "$tcp_node" ]; then
 					udp_node=$(get_cache_var "ACL_${sid}_tcp_node")
-					udp_port=$(get_cache_var "ACL_${sid}_tcp_port")
+					udp_port=$(get_cache_var "ACL_${sid}_tcp_redir_port")
 					set_cache_var "ACL_${sid}_udp_node" "${udp_node}"
 					set_cache_var "ACL_${sid}_udp_redir_port" "${udp_port}"
 				else
@@ -2066,7 +2078,7 @@ acl_app() {
 								fi
 							fi
 							set_cache_var "ACL_${sid}_udp_node" "${udp_node}"
-							set_cache_var "ACL_${sid}_udp_redir_port" "${redir_port}"
+							set_cache_var "ACL_${sid}_udp_redir_port" "${udp_port}"
 						fi
 					}
 				fi
@@ -2149,7 +2161,7 @@ start() {
 			sysctl -w net.bridge.bridge-nf-call-ip6tables=0 >/dev/null 2>&1
 		}
 	fi
-
+	
 	start_crontab
 	echolog "运行完成！\n"
 }
@@ -2264,7 +2276,7 @@ get_config() {
 	REMOTE_DNS_QUERY_STRATEGY="UseIP"
 	[ "$FILTER_PROXY_IPV6" = "1" ] && REMOTE_DNS_QUERY_STRATEGY="UseIPv4"
 	DNSMASQ_FILTER_PROXY_IPV6=${FILTER_PROXY_IPV6}
-
+	
 	RESOLVFILE=/tmp/resolv.conf.d/resolv.conf.auto
 	[ -f "${RESOLVFILE}" ] && [ -s "${RESOLVFILE}" ] || RESOLVFILE=/tmp/resolv.conf.auto
 

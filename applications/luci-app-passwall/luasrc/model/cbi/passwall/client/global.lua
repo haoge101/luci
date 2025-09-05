@@ -102,8 +102,8 @@ local chinadns_dot_validate = function(self, value, t)
 		ip = at_index and address:sub(at_index + 1, (hash_index or 0) - 1) or address:sub(1, (hash_index or 0) - 1)
 		port = hash_index and address:sub(hash_index + 1) or nil
 		local num_port = tonumber(port)
-		if (port and (not num_port or num_port <= 0 or num_port >= 65536)) or
-		   (domain and domain == "") or
+		if (port and (not num_port or num_port <= 0 or num_port >= 65536)) or 
+		   (domain and domain == "") or 
 		   (not datatypes.ipaddr(ip) and not datatypes.ip6addr(ip)) then
 			return false
 		end
@@ -774,6 +774,18 @@ o.rmempty = false
 
 o = s2:option(ListValue, "node", translate("Socks Node"))
 
+o = s2:option(DummyValue, "now_node", translate("Current Node"))
+o.rawhtml = true
+o.cfgvalue = function(_, n)
+	local current_node = api.get_cache_var("socks_" .. n)
+	if current_node then
+		local node = m:get(current_node)
+		if node then
+			return (api.get_node_remarks(node) or ""):gsub("(：)%[", "%1<br>[")
+		end
+	end
+end
+
 local n = 1
 m.uci:foreach(appname, "socks", function(s)
 	if s[".name"] == section then
@@ -788,7 +800,7 @@ o.datatype = "port"
 o.rmempty = false
 
 if has_singbox or has_xray then
-	o = s2:option(Value, "http_port", "HTTP " .. translate("Listen Port") .. " " .. translate("0 is not use"))
+	o = s2:option(Value, "http_port", "HTTP " .. translate("Listen Port"))
 	o.default = 0
 	o.datatype = "port"
 end
